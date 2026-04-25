@@ -173,3 +173,39 @@ Return ONLY the JSON object. No markdown, no explanation.`;
     throw new Error('AI analysis failed. Please try again.');
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 5. FLOOR PLAN AUTO-DETECT — Analyze uploaded floor plan to extract rooms
+// ═══════════════════════════════════════════════════════════════════════════════
+export async function autoDetectFloorPlanRooms(imageBase64) {
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+  const prompt = `You are CrisisFlow's AI Floor Plan Architect. A user has uploaded a floor plan image (e.g., lobby, floor 1).
+Analyze the image and detect all distinct rooms, zones, corridors, stairs, and spaces.
+
+Required JSON format:
+An array of objects, where each object represents a detected room/space with the following fields:
+- name: (string — e.g., "Reception", "Admin Office", "Kitchen", "Restaurant", "Lounge", "Art Gallery", "Stairs", "Corridor")
+- type: (string — one of "room", "corridor", "stairs", "exit")
+- points: (array of {xPercent, yPercent} — roughly outlining the boundary of the space. xPercent and yPercent should be float values between 0.0 and 1.0 representing the X and Y coordinates on the image where 0,0 is top-left. Provide 4 or more points to outline the shape. For curved walls, provide multiple points to approximate the curve.)
+
+Return ONLY the JSON array. No markdown, no explanation.`;
+
+  console.log('[GEMINI] Analyzing floor plan...');
+  const parts = [
+    { text: prompt },
+    { inlineData: { mimeType: 'image/jpeg', data: imageBase64 } }
+  ];
+
+  try {
+    const result = await model.generateContent(parts);
+    const raw = result.response.text();
+    const cleaned = raw.replace(/```json/g, '').replace(/```/g, '').trim();
+    const analysis = JSON.parse(cleaned);
+    console.log('[GEMINI] Floor plan detection complete:', analysis);
+    return analysis;
+  } catch (e) {
+    console.error('[GEMINI] Floor plan detection error:', e);
+    throw new Error('AI analysis failed. Please try again.');
+  }
+}

@@ -4,7 +4,7 @@ import { validateTacticalKey } from '../../services/tacticalKeyService';
 import { streamLiveIncidents } from '../../services/firebaseService';
 import { ref, onValue } from 'firebase/database';
 import { rtdb } from '../../firebase';
-import { getAllLocalFloors, featureToRect, filterByType } from '../../services/floorPlanService';
+import { loadDynamicFloors, getAllLocalFloors, featureToRect, filterByType } from '../../services/floorPlanService';
 import { findMultiFloorRoute, getMultiFloorGraph } from '../../services/navigationService';
 import { analyzeTriageImage } from '../../services/geminiService';
 
@@ -17,6 +17,28 @@ export default function TacticalView() {
   const [activeFloor, setActiveFloor] = useState('0');
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [clock, setClock] = useState(new Date());
+
+  // Dynamic floor data
+  const [allFloors, setAllFloors] = useState(() => getAllLocalFloors());
+  const [isLoadingFloors, setIsLoadingFloors] = useState(true);
+
+  // Load floors dynamically
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoadingFloors(true);
+    // You could pass a specific hotelId here if the tactical key contained it
+    loadDynamicFloors('hotel_default').then(({ floors }) => {
+      if (cancelled) return;
+      setAllFloors(floors);
+      setIsLoadingFloors(false);
+      // Switch active floor if current is not in new data
+      const keys = Object.keys(floors);
+      if (keys.length > 0 && !floors[activeFloor]) {
+        setActiveFloor(keys[0]);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [activeFloor]);
 
   // Image Triage State
   const [triageImage, setTriageImage] = useState(null);
@@ -75,7 +97,6 @@ export default function TacticalView() {
   };
 
   // Floor data
-  const allFloors = useMemo(() => getAllLocalFloors(), []);
   const geojson = allFloors[activeFloor];
 
   // Derive room status map
@@ -221,6 +242,16 @@ export default function TacticalView() {
                 <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
               </filter>
             </defs>
+            {/* Background image if available */}
+            {geojson?.metadata?.imageUrl ? (
+              <image
+                href={geojson.metadata.imageUrl}
+                x="0" y="0"
+                width={viewport.width} height={viewport.height}
+                preserveAspectRatio="xMidYMid slice"
+                opacity="0.85"
+              />
+            ) : null}
             {/* Rooms with heatmap colors */}
             {geojson?.features?.filter(f =>
               !['hallway', 'stair', 'exit', 'elevator'].includes(f.properties.type)

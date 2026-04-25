@@ -50,28 +50,124 @@ export default function ResponderHUD() {
     return () => unsubscribe();
   }, [myName]);
 
-  // Setup speech recognition
+  // Setup speech recognition — ROBUST implementation
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = 'en-US';
-      recognition.onresult = (event) => {
-        let fullTranscript = '';
-        for (let i = 0; i < event.results.length; ++i) {
-          fullTranscript += event.results[i][0].transcript;
-        }
-        setTranscript(fullTranscript);
-      };
-      recognition.onerror = (event) => {
-        console.warn('[SPEECH] Error:', event.error);
-        setIsListening(false);
-      };
-      recognitionRef.current = recognition;
+    if (!SpeechRecognition) {
+      console.warn('[SPEECH] Speech Recognition API not supported in this browser');
+      return;
     }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    recognition.maxAlternatives = 1;
+
+    // Accumulate final results properly
+    let finalTranscript = '';
+
+    recognition.onresult = (event) => {
+      let interimTranscript = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          finalTranscript += result[0].transcript + ' ';
+        } else {
+          interimTranscript += result[0].transcript;
+        }
+      }
+      setTranscript((finalTranscript + interimTranscript).trim());
+    };
+
+    recognition.onerror = (event) => {
+      console.warn('[SPEECH] Error:', event.error);
+      // Don't stop on 'no-speech' — user just hasn't spoken yet
+      if (event.error === 'no-speech') return;
+      // Abort means another recognition started — ignore
+      if (event.error === 'aborted') return;
+      // For 'not-allowed' — permission denied
+      if (event.error === 'not-allowed') {
+        console.error('[SPEECH] Microphone permission denied');
+        setIsListening(false);
+        return;
+      }
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      // Auto-restart if still in listening mode (browser stops after silence)
+      if (recognitionRef.current?._shouldBeListening) {
+        try {
+          recognition.start();
+          console.log('[SPEECH] Auto-restarted after silence timeout');
+        } catch (e) {
+          console.warn('[SPEECH] Could not auto-restart:', e.message);
+          setIsListening(false);
+          recognitionRef.current._shouldBeListening = false;
+        }
+      }
+    };
+
+    recognition._shouldBeListening = false;
+    recognition._resetFinalTranscript = () => { finalTranscript = ''; };
+    recognitionRef.current = recognition;
+
+    return () => {
+      recognition._shouldBeListening = false;
+      try { recognition.stop(); } catch { /* noop */ }
+    };
   }, []);
+
+  // Toggle-based start (tap to start, tap to stop)
+  const toggleListening = async () => {
+    if (isListening) {
+      stopListening();
+      return;
+    }
+
+    // Request microphone permission explicitly first
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Permission granted — release the stream immediately (SpeechRecognition handles its own)
+      stream.getTracks().forEach(t => t.stop());
+    } catch (err) {
+      console.error('[SPEECH] Microphone permission denied:', err);
+      alert('Microphone access is required for voice input. Please allow microphone access in your browser settings.');
+      return;
+    }
+
+    startListening();
+  };
+
+  const startListening = () => {
+    if (!recognitionRef.current) {
+      console.warn('[SPEECH] SpeechRecognition not available');
+      return;
+    }
+    setTranscript('');
+    recognitionRef.current._resetFinalTranscript();
+    recognitionRef.current._shouldBeListening = true;
+    setIsListening(true);
+    try {
+      recognitionRef.current.start();
+      console.log('[SPEECH] Started listening');
+    } catch (e) {
+      // Already started — ignore
+      console.warn('[SPEECH] Start error (may already be running):', e.message);
+    }
+  };
+
+  const stopListening = () => {
+    setIsListening(false);
+    if (recognitionRef.current) {
+      recognitionRef.current._shouldBeListening = false;
+      try {
+        recognitionRef.current.stop();
+        console.log('[SPEECH] Stopped listening');
+      } catch { /* noop */ }
+    }
+  };
 
   const handleImageCapture = async (e) => {
     const file = e.target.files[0];
@@ -86,21 +182,6 @@ export default function ResponderHUD() {
       setCapturedImage(clean);
     };
     reader.readAsDataURL(file);
-  };
-
-  const startListening = () => {
-    setTranscript('');
-    setIsListening(true);
-    if (recognitionRef.current) {
-      try { recognitionRef.current.start(); } catch (e) { /* already started */ }
-    }
-  };
-
-  const stopListening = () => {
-    setIsListening(false);
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-    }
   };
 
   const submitReport = async () => {
@@ -389,20 +470,25 @@ export default function ResponderHUD() {
           </svg>
         </button>
 
-        {/* Push-to-talk button */}
+        {/* Voice input button — tap to start/stop */}
         <button
           className={`staff-action-btn staff-action-ptt ${isListening ? 'active' : ''}`}
-          onPointerDown={startListening}
-          onPointerUp={stopListening}
-          onPointerLeave={() => isListening && stopListening()}
+          onClick={toggleListening}
         >
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
-            <path d="M19 10v2a7 7 0 01-14 0v-2" />
-            <line x1="12" y1="19" x2="12" y2="23" />
-            <line x1="8" y1="23" x2="16" y2="23" />
-          </svg>
+          {isListening ? (
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" />
+            </svg>
+          ) : (
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
+              <path d="M19 10v2a7 7 0 01-14 0v-2" />
+              <line x1="12" y1="19" x2="12" y2="23" />
+              <line x1="8" y1="23" x2="16" y2="23" />
+            </svg>
+          )}
         </button>
 
         {/* Quick text report */}

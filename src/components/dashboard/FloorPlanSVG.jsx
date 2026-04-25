@@ -1,18 +1,18 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import useIncidentStore from '../../store/useIncidentStore';
 import { DANGER_COLORS } from '../../models/building';
 import { deriveDangerZones } from '../../models/crisisState';
 import { SEED_ZONES } from '../../models/building';
 
-// ── GeoJSON Data Layer (Spatial-First Architecture) ──────────────────────────
-import { getAllLocalFloors, featureToRect, filterByType } from '../../services/floorPlanService';
+// ── GeoJSON Data Layer — now loads dynamically from Firestore ────────────────
+import { loadDynamicFloors, getAllLocalFloors, featureToRect, filterByType } from '../../services/floorPlanService';
 // ── Multi-Floor Navigation (Dijkstra across floors) ─────────────────────────
 import { findMultiFloorRoute, pathCoordsToSvgPath, getMultiFloorGraph } from '../../services/navigationService';
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// COMPONENT — GeoJSON-driven Floor Plan Renderer with Multi-Floor Routing
+// COMPONENT — Dynamic Floor Plan Renderer (Firestore-first, local fallback)
 // ═══════════════════════════════════════════════════════════════════════════════
-export default function FloorPlanSVG({ onZoneClick, forceEvacZone, hideControls, isEvacMode, forceFloor }) {
+export default function FloorPlanSVG({ onZoneClick, forceEvacZone, hideControls, isEvacMode, forceFloor, hotelId = 'hotel_default' }) {
   const [activeFloor, setActiveFloor] = useState(
     forceFloor != null ? String(forceFloor) :
     forceEvacZone ? Math.floor(parseInt(forceEvacZone.replace('z_', '')) / 100).toString() : '0'
@@ -20,11 +20,31 @@ export default function FloorPlanSVG({ onZoneClick, forceEvacZone, hideControls,
   const [hoveredZone, setHoveredZone] = useState(null);
   const [selectedZone, setSelectedZone] = useState(forceEvacZone || null);
   const [showEvacRoute, setShowEvacRoute] = useState(!!forceEvacZone);
+  const [showBgImage, setShowBgImage] = useState(true);
+  const [allFloors, setAllFloors] = useState(() => getAllLocalFloors());
+  const [dataSource, setDataSource] = useState('local');
+  const [isLoading, setIsLoading] = useState(true);
 
   const liveIncidents = useIncidentStore(s => s.liveIncidents);
 
-  // ── Load GeoJSON for current floor ────────────────────────────────────────
-  const allFloors = useMemo(() => getAllLocalFloors(), []);
+  // ── Load floors from Firestore (admin-saved), fallback to local ───────────
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+    loadDynamicFloors(hotelId).then(({ floors, source }) => {
+      if (cancelled) return;
+      setAllFloors(floors);
+      setDataSource(source);
+      // If current activeFloor doesn't exist in new data, switch to first available
+      const keys = Object.keys(floors);
+      if (keys.length > 0 && !floors[activeFloor]) {
+        setActiveFloor(keys[0]);
+      }
+      setIsLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [hotelId]);
+
   const floorKeys = Object.keys(allFloors);
   const geojson = allFloors[activeFloor];
 
@@ -70,6 +90,10 @@ export default function FloorPlanSVG({ onZoneClick, forceEvacZone, hideControls,
     return findMultiFloorRoute(nodeEntry[0], { isCalamity, blockedZones: blockedZoneIds });
   }, [showEvacRoute, selectedZone, activeFloor, blockedZoneIds, isCalamity]);
 
+  // ── Check if this floor has a background image (from admin tool) ──────────
+  const floorImageUrl = geojson?.metadata?.imageUrl || null;
+
+  if (isLoading) return <div style={{ color: '#666', padding: 20, textAlign: 'center' }}>⏳ Loading floor plans...</div>;
   if (!geojson) return <div style={{ color: '#666', padding: 20 }}>No floor plan data for this level.</div>;
 
   // ── Classify features ─────────────────────────────────────────────────────
@@ -126,10 +150,22 @@ export default function FloorPlanSVG({ onZoneClick, forceEvacZone, hideControls,
             </clipPath>
           </defs>
 
-          {/* Background */}
+          {/* Background — use uploaded image if available, else dark grid */}
           <rect width={viewport.width} height={viewport.height} fill="#111116" />
-          <rect width={viewport.width} height={viewport.height} fill="url(#grid)" />
-          <rect x="40" y="40" width={viewport.width - 80} height={viewport.height - 60} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="1" rx="4" />
+          {floorImageUrl && showBgImage ? (
+            <image
+              href={floorImageUrl}
+              x="0" y="0"
+              width={viewport.width} height={viewport.height}
+              preserveAspectRatio="xMidYMid slice"
+              opacity="0.85"
+            />
+          ) : (
+            <>
+              <rect width={viewport.width} height={viewport.height} fill="url(#grid)" />
+              <rect x="40" y="40" width={viewport.width - 80} height={viewport.height - 60} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="1" rx="4" />
+            </>
+          )}
 
           {/* ── Corridors ────────────────────────────────────────────── */}
           {corridors.map(f => {
@@ -138,10 +174,19 @@ export default function FloorPlanSVG({ onZoneClick, forceEvacZone, hideControls,
               fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.06)" strokeWidth="0.5" />;
           })}
 
-          {/* ── Rooms / Zones ────────────────────────────────────────── */}
+          {/* Rooms / Zones */}
           {rooms.map(f => {
             const p = f.properties;
             const r = featureToRect(f);
+            
+            // Generate polygon points string if available
+            let pointsStr = null;
+            if (f.geometry.coordinates[0].length > 5) { // more than the standard 4 corners + closed point
+              pointsStr = f.geometry.coordinates[0].map(c => `${c[0]},${c[1]}`).join(' ');
+            } else if (f.properties.is_custom_shape) {
+              pointsStr = f.geometry.coordinates[0].map(c => `${c[0]},${c[1]}`).join(' ');
+            }
+
             const danger = getZoneDangerColor(p.id, p.name);
             const isHovered = hoveredZone === p.id;
             const isSelected = selectedZone === p.id;
@@ -161,14 +206,27 @@ export default function FloorPlanSVG({ onZoneClick, forceEvacZone, hideControls,
                 onMouseLeave={() => setHoveredZone(null)}
                 onClick={() => handleZoneClick(f)}
                 style={{ cursor: 'pointer' }}>
-                <rect x={r.x} y={r.y} width={r.w} height={r.h}
-                  fill={fillColor} fillOpacity={fillOpacity}
-                  stroke={danger ? danger.color : isSelected ? '#8b5cf6' : isHovered ? '#71717a' : 'rgba(255,255,255,0.08)'}
-                  strokeWidth={isSelected ? 2 : danger ? 1.5 : 0.7} rx="3"
-                  filter={danger?.pulse ? 'url(#dangerGlow)' : undefined} />
-                {danger?.pulse && (
+                
+                {pointsStr ? (
+                  <polygon points={pointsStr}
+                    fill={fillColor} fillOpacity={fillOpacity}
+                    stroke={danger ? danger.color : isSelected ? '#8b5cf6' : isHovered ? '#71717a' : 'rgba(255,255,255,0.08)'}
+                    strokeWidth={isSelected ? 2 : danger ? 1.5 : 0.7}
+                    filter={danger?.pulse ? 'url(#dangerGlow)' : undefined} />
+                ) : (
                   <rect x={r.x} y={r.y} width={r.w} height={r.h}
-                    fill={danger.color} fillOpacity="0.15" rx="3" className="danger-pulse-rect" />
+                    fill={fillColor} fillOpacity={fillOpacity}
+                    stroke={danger ? danger.color : isSelected ? '#8b5cf6' : isHovered ? '#71717a' : 'rgba(255,255,255,0.08)'}
+                    strokeWidth={isSelected ? 2 : danger ? 1.5 : 0.7} rx="3"
+                    filter={danger?.pulse ? 'url(#dangerGlow)' : undefined} />
+                )}
+
+                {danger?.pulse && (
+                  pointsStr ? (
+                    <polygon points={pointsStr} fill={danger.color} fillOpacity="0.15" className="danger-pulse-rect" />
+                  ) : (
+                    <rect x={r.x} y={r.y} width={r.w} height={r.h} fill={danger.color} fillOpacity="0.15" rx="3" className="danger-pulse-rect" />
+                  )
                 )}
                 
                 {staffIncident && staffIncident.status === 'reached' && (
@@ -318,6 +376,21 @@ export default function FloorPlanSVG({ onZoneClick, forceEvacZone, hideControls,
       {/* ── Controls ──────────────────────────────────────────────────── */}
       {!hideControls && (
         <div className="floorplan-controls" style={isEvacMode ? { top: 'auto', bottom: 16, right: 16, left: 16, background: 'transparent', boxShadow: 'none', border: 'none', padding: 0 } : {}}>
+          
+          {!isEvacMode && floorImageUrl && (
+            <button 
+              className="floorplan-level-btn"
+              onClick={() => setShowBgImage(!showBgImage)}
+              style={{ marginBottom: 12, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(24,24,27,0.8)', width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}
+            >
+              {showBgImage ? (
+                <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg> Hide Image</>
+              ) : (
+                <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg> Show Image</>
+              )}
+            </button>
+          )}
+
           <div className="floorplan-level-selector" style={isEvacMode ? { display: 'flex', gap: 8, overflowX: 'auto', background: 'rgba(0,0,0,0.8)', padding: 12, borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)' } : {}}>
           {(isEvacMode && evacRoute ? evacRoute.floorsTraversed.map(f => f.toString()) : floorKeys).map(key => (
             <button key={key}
@@ -437,7 +510,7 @@ export default function FloorPlanSVG({ onZoneClick, forceEvacZone, hideControls,
           {/* Data source indicator */}
           {!isEvacMode && (
             <div style={{ marginTop: 12, fontSize: 9, color: '#52525b', fontFamily: "'JetBrains Mono', monospace", letterSpacing: 0.5 }}>
-              SRC: GEOJSON · {geojson.features.length} features · {isCalamity ? '🔴 CALAMITY' : '🟢 NORMAL'}
+              SRC: {dataSource.toUpperCase()} · {geojson.features.length} features · {isCalamity ? '🔴 CALAMITY' : '🟢 NORMAL'}
             </div>
           )}
         </div>

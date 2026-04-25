@@ -5,6 +5,7 @@ import SignalIntel from './SignalIntel';
 import SopList from './SopList';
 import DispatchSection from './DispatchSection';
 import useIncidentStore from '../../store/useIncidentStore';
+import { Search, Activity, Check, CircleDot, Loader2 } from 'lucide-react';
 
 export default function IncidentProcessView({ incident }) {
   const color = severityColor(incident.severity);
@@ -90,7 +91,7 @@ export default function IncidentProcessView({ incident }) {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
             <div style={{ width: 12, height: 1, background: 'var(--color-primary)' }} />
-            <SectionTitle icon="🔍" label="INTELLIGENCE PLANE" />
+            <SectionTitle icon={<Search size={14} color="rgba(255,255,255,0.4)" />} label="INTELLIGENCE PLANE" />
           </div>
           <CaseSummary incident={incident} />
           <SignalIntel incident={incident} />
@@ -109,7 +110,7 @@ export default function IncidentProcessView({ incident }) {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
             <div style={{ width: 12, height: 1, background: '#8b5cf6' }} />
-            <SectionTitle icon="⚡" label="EXECUTION PLANE" />
+            <SectionTitle icon={<Activity size={14} color="#8b5cf6" />} label="EXECUTION PLANE" />
           </div>
           <SopList incident={incident} />
           <DispatchSection incident={incident} />
@@ -137,11 +138,11 @@ function TacticalStepper({ incident, isProcessing }) {
   
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 0, width: '100%', maxWidth: 400 }}>
-      <Step icon="✓" label="ANALYZE" active={true} complete={true} />
+      <Step icon={<Check size={14} />} label="ANALYZE" active={true} complete={true} />
       <Connector active={hasSops} />
-      <Step icon={isProcessing && !incident.sops?.length ? "●" : "✓"} label="PROTOCOL" active={isProcessing} complete={incident.sops?.length > 0} />
+      <Step icon={isProcessing && !incident.sops?.length ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} label="PROTOCOL" active={isProcessing} complete={incident.sops?.length > 0} />
       <Connector active={hasDispatch} />
-      <Step icon={isProcessing && incident.sops?.length && !hasDispatch ? "●" : "✓"} label="DISPATCH" active={isProcessing && incident.sops?.length > 0} complete={hasDispatch} />
+      <Step icon={isProcessing && incident.sops?.length && !hasDispatch ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} label="DISPATCH" active={isProcessing && incident.sops?.length > 0} complete={hasDispatch} />
     </div>
   );
 }

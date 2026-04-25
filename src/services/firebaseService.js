@@ -121,22 +121,28 @@ export async function findNearestResponder(requiredSkills, incidentFloor, incide
     const snap = await getDocs(query(collection(db, 'staff'), where('isAvailable', '==', true)));
     let all = snap.empty ? [] : snap.docs.map(d => d.data());
 
-    const normalised = requiredSkills.map(s => s.toLowerCase());
-    let matched = all.filter(staff => {
-      const staffSkills = staff.skills.map(s => s.toLowerCase());
-      return normalised.some(needed => staffSkills.some(have => have.includes(needed) || needed.includes(have)));
+    const normalised = requiredSkills.map(s => s.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim());
+
+    // Score each staff member by how many required skills they match
+    const scored = all.map(staff => {
+      const staffSkills = staff.skills.map(s => s.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim());
+      let matchCount = 0;
+      for (const needed of normalised) {
+        const neededWords = needed.split(' ').filter(w => w.length > 2);
+        const hasMatch = staffSkills.some(have => {
+          const haveWords = have.split(' ').filter(w => w.length > 2);
+          // A skill matches if ANY significant word overlaps
+          return neededWords.some(nw => haveWords.some(hw => hw.includes(nw) || nw.includes(hw)));
+        });
+        if (hasMatch) matchCount++;
+      }
+      return { staff, matchCount };
     });
 
-    if (matched.length === 0) {
-      console.log('[DISPATCH] No exact match. Falling back to all staff.');
-      matched = all;
-    }
-
-    // 1. Try to locate the incident on the 2D grid
+    // Sort: highest skill-match first, then distance as tiebreaker
     const lowerLoc = incidentLocation.toLowerCase();
-    const incidentZone = currentZones.find(z => lowerLoc.includes(z.label.toLowerCase()) || lowerLoc.includes(z.id.toLowerCase()));
+    const incidentZone = currentZones.find(z => lowerLoc.includes(z.label?.toLowerCase()) || lowerLoc.includes(z.id?.toLowerCase()));
 
-    // 2. Helper to calculate 2D distance score
     const getDistanceScore = (responder) => {
       if (incidentZone) {
         const rZone = currentZones.find(z => z.id === responder.zoneId);
@@ -146,35 +152,57 @@ export async function findNearestResponder(requiredSkills, incidentFloor, incide
           return Math.sqrt(dx * dx + dy * dy);
         }
       }
-      return Math.abs(responder.floor - incidentFloor) * 200; // Fallback: 1 floor diff = 200px equivalent
+      return Math.abs(responder.floor - incidentFloor) * 200;
     };
 
-    // 3. Helper to format ETA
-    const getEtaStr = (responder) => {
-      if (incidentZone) {
-        const rZone = currentZones.find(z => z.id === responder.zoneId);
-        if (rZone) {
-          const distance = getDistanceScore(responder);
-          if (distance < 100) return '1 min (Nearby)';
-          if (distance < 300) return '2-3 mins (Same Wing)';
-          return '4+ mins (Walking)';
-        }
-      }
-      const diff = Math.abs(responder.floor - incidentFloor);
-      if (diff === 0) return '1-2 mins';
-      if (diff <= 2) return '3-4 mins';
-      return '5+ mins';
-    };
+    scored.sort((a, b) => {
+      // Primary: more skill matches = better
+      if (b.matchCount !== a.matchCount) return b.matchCount - a.matchCount;
+      // Secondary: closer distance = better
+      return getDistanceScore(a.staff) - getDistanceScore(b.staff);
+    });
 
-    matched.sort((a, b) => getDistanceScore(a) - getDistanceScore(b));
-    const best = matched[0];
-    console.log('[DISPATCH] Best match:', best.name, 'via 2D Distance');
-    return `${best.name} (${best.role}) — ${getEtaStr(best)}`;
+    // Take top candidate — must have at least 1 matching skill
+    // If nobody matched, fall back to anyone on the same floor (closest)
+    const candidate = scored[0];
+    if (!candidate) return null;
+
+    if (candidate.matchCount === 0) {
+      console.warn('[DISPATCH] No skill match found — falling back to floor proximity only.');
+      all.sort((a, b) => getDistanceScore(a) - getDistanceScore(b));
+      const closest = all[0];
+      if (!closest) return null;
+      return `${closest.name} (${closest.role}) — ${getEtaStr(closest, incidentFloor, incidentZone, currentZones)} [PROXIMITY ONLY]`;
+    }
+
+    const { staff: best, matchCount } = candidate;
+    console.log(`[DISPATCH] Best match: ${best.name} with ${matchCount}/${normalised.length} skills matched`);
+    return `${best.name} (${best.role}) — ${getEtaStr(best, incidentFloor, incidentZone, currentZones)}`;
+
   } catch (e) {
     console.error('[DISPATCH] Error:', e);
     return null;
   }
 }
+
+function getEtaStr(responder, incidentFloor, incidentZone, currentZones) {
+  if (incidentZone) {
+    const rZone = currentZones.find(z => z.id === responder.zoneId);
+    if (rZone) {
+      const dx = (rZone.left + rZone.width / 2) - (incidentZone.left + incidentZone.width / 2);
+      const dy = (rZone.top + rZone.height / 2) - (incidentZone.top + incidentZone.height / 2);
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      if (distance < 100) return '1 min (Nearby)';
+      if (distance < 300) return '2-3 mins (Same Wing)';
+      return '4+ mins (Walking)';
+    }
+  }
+  const diff = Math.abs((responder.floor ?? 1) - incidentFloor);
+  if (diff === 0) return '1-2 mins';
+  if (diff <= 2) return '3-4 mins';
+  return '5+ mins';
+}
+
 
 // ── Update Incident (Generic) ────────────────────────────────────────────────
 export async function updateIncident(incidentId, updates) {

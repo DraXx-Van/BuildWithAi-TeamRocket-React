@@ -155,8 +155,8 @@ const useIncidentStore = create((set, get) => ({
     if (unsubscribeEvacuation) unsubscribeEvacuation();
   },
 
-  // ── processIncidentData — ROBUST pipeline with Gemini fallback ───────────
-  processIncidentData: async (transcript, imageBase64 = null) => {
+  // ── processIncidentData — port of IncidentNotifier.processIncidentData ───
+  processIncidentData: async (transcript, imageBase64 = null, reporterName = null) => {
     set({ isProcessing: true, processingError: null, sopSteps: [] });
     try {
       // 0. DLP sanitization — strip PII before analysis
@@ -188,7 +188,8 @@ const useIncidentStore = create((set, get) => ({
         location,
         description: cleanDesc,
         requiredSkills: skills,
-        evidenceLogs: [cleanTranscript],
+        evidenceLogs: [transcript],
+        reporterName,
       });
 
       // 3. Cluster: merge or create — ALWAYS writes to RTDB
@@ -234,6 +235,32 @@ const useIncidentStore = create((set, get) => ({
     } catch (e) {
       console.error('[STORE] processIncidentData CRITICAL error:', e);
       set({ isProcessing: false, processingError: e.message });
+    }
+  },
+
+  // ── appendLogToIncident ───────────────────────────────────────────────────
+  appendLogToIncident: async (incidentId, logMessage, imageBase64 = null) => {
+    set({ isProcessing: true });
+    try {
+      const { liveIncidents } = get();
+      const inc = liveIncidents.find(i => i.id === incidentId);
+      if (inc) {
+        // Prepare new evidence logs
+        const newLogs = [...(inc.evidenceLogs || []), logMessage];
+        
+        // Update via Firebase service
+        await updateIncident(incidentId, { 
+          evidenceLogs: newLogs,
+          signalCount: (inc.signalCount || 1) + 1 
+        });
+        
+        // If image provided, we could theoretically do further analysis,
+        // but for now we just log it as a chat update.
+      }
+      set({ isProcessing: false });
+    } catch (e) {
+      console.error('[STORE] appendLogToIncident error:', e);
+      set({ isProcessing: false });
     }
   },
 

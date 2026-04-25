@@ -1,4 +1,5 @@
 import useIncidentStore from '../../store/useIncidentStore';
+import { ClipboardList } from 'lucide-react';
 
 export default function SopList({ incident }) {
   const { sopSteps, isProcessing } = useIncidentStore();
@@ -10,7 +11,7 @@ export default function SopList({ incident }) {
       border: '1px solid rgba(255,255,255,0.05)' 
     }}>
       <div className="step-label">
-        <span className="step-num" style={{ background: '#8b5cf6' }}>📋</span>
+        <span className="step-num" style={{ background: 'rgba(139, 92, 246, 0.1)' }}><ClipboardList size={14} color="#8b5cf6" /></span>
         AI RESPONSE PROTOCOL
       </div>
 

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CrisisFlow — Offline</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0a0a0f;
+      color: #fafafa;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .offline-container {
+      text-align: center;
+      max-width: 420px;
+    }
+    .offline-icon { font-size: 64px; margin-bottom: 24px; }
+    .offline-title {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin-bottom: 12px;
+    }
+    .offline-text {
+      font-size: 15px;
+      color: #a1a1aa;
+      line-height: 1.6;
+      margin-bottom: 32px;
+    }
+    .offline-emergency {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 16px 32px;
+      background: linear-gradient(135deg, #b91c1c, #dc2626);
+      color: white;
+      border: none;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 16px;
+      letter-spacing: 1px;
+      cursor: pointer;
+      box-shadow: 0 8px 30px rgba(220,38,38,0.3);
+    }
+    .offline-retry {
+      display: block;
+      margin: 20px auto 0;
+      padding: 12px 24px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      color: #a1a1aa;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .offline-status {
+      margin-top: 40px;
+      font-size: 10px;
+      color: rgba(255,255,255,0.15);
+      letter-spacing: 2px;
+      font-family: 'Courier New', monospace;
+    }
+  </style>
+</head>
+<body>
+  <div class="offline-container">
+    <div class="offline-icon">📡</div>
+    <h1 class="offline-title">You're Offline</h1>
+    <p class="offline-text">
+      CrisisFlow is unable to reach the server. This may be due to a network
+      outage. Your pending reports will be sent automatically when the
+      connection is restored.
+    </p>
+    <button class="offline-emergency" onclick="alert('Emergency call: Dial 911/112 from your phone')">
+      🚨 CALL EMERGENCY
+    </button>
+    <button class="offline-retry" onclick="location.reload()">
+      ↻ Retry Connection
+    </button>
+    <div class="offline-status">CRISISFLOW · OFFLINE MODE · QUEUED REPORTS WILL SYNC</div>
+  </div>
+</body>
+</html>

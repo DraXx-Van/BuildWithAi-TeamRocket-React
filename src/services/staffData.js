@@ -40,7 +40,6 @@ export const kSeedStaff = [
   { id: 'staff_14', name: 'Rohit Joshi',   role: 'Electrician Sr.',         floor: 3, zoneId: 'electrical_room', skills: ['Electrician', 'Hazmat', 'Fire Fighting', 'Structural Engineering'], isAvailable: true, shift: 'day',   phone: '+91-9800000014' },
   { id: 'staff_15', name: 'Kavya Reddy',   role: 'Housekeeping Lead',       floor: 4, zoneId: 'corridor_4', skills: ['Housekeeping', 'First Aid', 'Emergency Evacuation', 'Leak Control'], isAvailable: true, shift: 'day',   phone: '+91-9800000015' },
 ];
-];
 
 export function getEta(staffFloor, incidentFloor = 1) {
   const diff = Math.abs(staffFloor - (incidentFloor ?? 1));

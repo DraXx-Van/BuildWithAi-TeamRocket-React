@@ -376,4 +376,3 @@ export async function getRoomAssignment(userId) {
   const snap = await get(ref(rtdb, `room_assignments/${userId}`));
   return snap.exists() ? snap.val() : null;
 }
-}

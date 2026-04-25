@@ -8,10 +8,10 @@ export default defineConfig({
     // Code splitting to reduce bundle size and prevent OOM
     rollupOptions: {
       output: {
-        manualChunks: {
-          'firebase': ['firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/database', 'firebase/storage'],
-          'vendor': ['react', 'react-dom', 'react-router-dom', 'zustand'],
-          'ai': ['@google/generative-ai'],
+        manualChunks(id) {
+          if (id.includes('firebase')) return 'firebase';
+          if (id.includes('@google/generative-ai')) return 'ai';
+          if (id.includes('node_modules')) return 'vendor';
         },
       },
     },

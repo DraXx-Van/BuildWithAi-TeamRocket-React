@@ -40,14 +40,23 @@ export default function StaffManager() {
   };
 
   const handleEdit = (s) => {
-    setForm({ name: s.name, role: s.role, floor: s.floor, skills: [...s.skills], shift: s.shift || 'day', phone: s.phone || '', photoUrl: s.photoUrl || '', isAvailable: s.isAvailable });
+    setForm({ 
+      name: s.name || '', 
+      role: s.role || '', 
+      floor: s.floor ?? 1, 
+      skills: s.skills ? [...s.skills] : [], 
+      shift: s.shift || 'day', 
+      phone: s.phone || '', 
+      photoUrl: s.photoUrl || '', 
+      isAvailable: s.isAvailable ?? true 
+    });
     setEditingId(s.id);
     setShowForm(true);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.name.trim() || !form.role) return;
+    if (!form.name || !form.name.trim() || !form.role) return;
 
     if (editingId) {
       await updateStaffMember(editingId, form);
@@ -193,14 +202,14 @@ export default function StaffManager() {
               <div className="staff-card-top">
                 {s.photoUrl ? (
                   <div className="staff-card-avatar" style={{ backgroundImage: `url(${s.photoUrl})`, backgroundSize: 'cover', color: 'transparent' }}>
-                    {s.name.charAt(0)}
+                    {(s.name || '?').charAt(0)}
                   </div>
                 ) : (
-                  <div className="staff-card-avatar">{s.name.charAt(0)}</div>
+                  <div className="staff-card-avatar">{(s.name || '?').charAt(0)}</div>
                 )}
                 <div className="staff-card-info">
-                  <div className="staff-card-name">{s.name}</div>
-                  <div className="staff-card-role">{s.role}</div>
+                  <div className="staff-card-name">{s.name || 'Unknown'}</div>
+                  <div className="staff-card-role">{s.role || 'Unassigned'}</div>
                 </div>
                 <div className={`staff-card-status ${s.isAvailable ? 'on' : 'off'}`}>
                   {s.isAvailable ? 'ON DUTY' : 'OFF'}
@@ -213,10 +222,10 @@ export default function StaffManager() {
               </div>
 
               <div className="staff-card-skills">
-                {s.skills.slice(0, 4).map(sk => (
+                {(s.skills || []).slice(0, 4).map(sk => (
                   <span key={sk} className="staff-card-skill-tag">{sk}</span>
                 ))}
-                {s.skills.length > 4 && <span className="staff-card-skill-more">+{s.skills.length - 4}</span>}
+                {(s.skills || []).length > 4 && <span className="staff-card-skill-more">+{(s.skills || []).length - 4}</span>}
               </div>
 
               <div className="staff-card-actions">

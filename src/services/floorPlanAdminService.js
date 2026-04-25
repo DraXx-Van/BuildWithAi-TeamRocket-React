@@ -192,3 +192,19 @@ export async function updateFloorLabel(hotelId, floorLevel, label) {
   const floorDocRef = doc(db, `hotels/${hotelId}/floors`, `level_${floorLevel}`);
   await updateDoc(floorDocRef, { label });
 }
+
+/**
+ * Fetch full floor data (metadata + rooms) in one go for a specific floor.
+ * @param {string} hotelId 
+ * @param {number|string} floorLevel 
+ * @returns {Promise<{meta: object, rooms: array}>}
+ */
+export async function getFullFloorData(hotelId, floorLevel) {
+  const meta = await getFloorPlanMeta(hotelId, floorLevel);
+  if (!meta) {
+    return { meta: null, rooms: [] };
+  }
+  const rooms = await getRoomCoordinates(hotelId, floorLevel);
+  return { meta, rooms };
+}
+

@@ -5,9 +5,10 @@ import { sanitizeText } from '../services/dlpService';
 import {
   mergeOrCreateIncident, saveIncidentToHistory, findNearestResponder,
   confirmDispatch as fbConfirmDispatch, resolveLiveIncident,
-  seedStaffIfEmpty, streamLiveIncidents, streamZones, saveZonesToFirebase,
+  seedStaffIfEmpty, streamLiveIncidents,
   updateIncident, streamEvacuationStatus, triggerEvacuation
 } from '../services/firebaseService';
+import { getHotelFloors, getFullFloorData } from '../services/floorPlanAdminService';
 
 // ── Zustand store — replaces all Riverpod providers ──────────────────────────
 const useIncidentStore = create((set, get) => ({
@@ -84,13 +85,9 @@ const useIncidentStore = create((set, get) => ({
     });
   },
 
-  // Floor Plan Zones
-  zones: [],
-  unsubscribeZones: null,
-  saveZones: async (newZones) => {
-    set({ zones: newZones });
-    await saveZonesToFirebase(newZones);
-  },
+  // Dynamic Floor Plan Data
+  floorData: {},
+  zones: [], // Kept for dispatch compatibility
 
   // ── Initialize: seed staff + start live streams ───────────────────────────
   init: async () => {
@@ -113,26 +110,48 @@ const useIncidentStore = create((set, get) => ({
       
       set({ liveIncidents: incidents, incidentsLoading: false });
     });
-    const unsubscribeZ = streamZones((fetchedZones) => {
-      const zones = fetchedZones || [];
-      const discoveredFloors = [...new Set(zones.map(z => (z.floor || '1').toString().toLowerCase()))];
-      const uniqueFloors = [...new Set(['1', ...discoveredFloors])].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-      set({ zones, floors: uniqueFloors });
-    });
+    // Fetch dynamic floor data
+    const hotelId = 'hotel_default';
+    getHotelFloors(hotelId).then(async (fetchedFloors) => {
+      if (fetchedFloors && fetchedFloors.length > 0) {
+        const floorLevels = fetchedFloors.map(f => String(f.floorLevel));
+        const uniqueFloors = [...new Set(['1', ...floorLevels])].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+        set({ floors: uniqueFloors });
+        
+        const floorDataObj = {};
+        const zones = [];
+        for (const level of uniqueFloors) {
+          const data = await getFullFloorData(hotelId, level);
+          floorDataObj[level] = data;
+          if (data.rooms) {
+            data.rooms.forEach(r => {
+               zones.push({
+                 id: r.id,
+                 label: r.name,
+                 floor: level,
+                 left: r.xPercent * 1000,
+                 top: r.yPercent * 1000,
+                 width: (r.widthPercent || 0.08) * 1000,
+                 height: (r.heightPercent || 0.12) * 1000,
+               });
+            });
+          }
+        }
+        set({ floorData: floorDataObj, zones });
+      }
+    }).catch(e => console.error('[STORE] Failed to load floor data:', e));
     const unsubscribeEvac = streamEvacuationStatus((isActive) => {
       set({ isEvacuationActive: isActive });
     });
     set({ 
       unsubscribeLiveIncidents: unsubscribeLive, 
-      unsubscribeZones: unsubscribeZ,
       unsubscribeEvacuation: unsubscribeEvac 
     });
   },
 
   cleanup: () => {
-    const { unsubscribeLiveIncidents, unsubscribeZones, unsubscribeEvacuation } = get();
+    const { unsubscribeLiveIncidents, unsubscribeEvacuation } = get();
     if (unsubscribeLiveIncidents) unsubscribeLiveIncidents();
-    if (unsubscribeZones) unsubscribeZones();
     if (unsubscribeEvacuation) unsubscribeEvacuation();
   },
 

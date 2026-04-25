@@ -1,6 +1,6 @@
 export default function StaffCard({ member }) {
-  const statusColor = member.isAvailable ? 'var(--color-success)' : 'var(--color-warning)';
-  const initial = member.name.charAt(0);
+  const statusColor = member?.isAvailable ? 'var(--color-success)' : 'var(--color-warning)';
+  const initial = member?.name ? member.name.charAt(0) : '?';
 
   return (
     <div style={{
@@ -23,8 +23,8 @@ export default function StaffCard({ member }) {
           {initial}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-hi)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{member.name}</div>
-          <div style={{ fontSize: 11, color: 'var(--color-text-mid)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{member.role}</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-hi)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{member?.name || 'Unknown'}</div>
+          <div style={{ fontSize: 11, color: 'var(--color-text-mid)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{member?.role || 'No Role'}</div>
         </div>
         <div style={{
           width: 10, height: 10, borderRadius: '50%',
@@ -36,15 +36,15 @@ export default function StaffCard({ member }) {
 
       {/* Floor + status */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 11, color: 'var(--color-text-mid)' }}>📍 Floor {member.floor}</span>
+        <span style={{ fontSize: 11, color: 'var(--color-text-mid)' }}>📍 Floor {member?.floor ?? '-'}</span>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 700, color: statusColor, letterSpacing: 1 }}>
-          {member.isAvailable ? 'ON DUTY' : 'BUSY'}
+          {member?.isAvailable ? 'ON DUTY' : 'BUSY'}
         </span>
       </div>
 
       {/* Skills */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-        {member.skills.slice(0, 3).map((s, i) => (
+        {(member?.skills || []).slice(0, 3).map((s, i) => (
           <span key={i} style={{
             padding: '2px 7px',
             background: 'rgba(63,63,70,0.5)',

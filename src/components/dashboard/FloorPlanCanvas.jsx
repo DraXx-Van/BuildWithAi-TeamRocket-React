@@ -61,7 +61,8 @@ export default function FloorPlanCanvas({ fullBleed = false }) {
   const { 
     liveIncidents, zones: storeZones, saveZones, 
     isScanning, setScanning, 
-    currentFloor, floors, setCurrentFloor, addFloor, removeFloor
+    currentFloor, floors, setCurrentFloor, addFloor, removeFloor,
+    confirmDispatch, setDispatchResult
   } = useIncidentStore();
   
   const [isEditing, setIsEditing] = useState(false);
@@ -114,14 +115,34 @@ export default function FloorPlanCanvas({ fullBleed = false }) {
     
     const containerRect = containerRef.current?.getBoundingClientRect();
     if (containerRect) {
-      // Focus on the center of the floor container (index * spacing)
-      // We want the floor's (0,0) to be roughly centered or at least visible
-      const targetX = floorIndex * FLOOR_SPACING;
-      const targetY = 0; 
+      const currentZones = isEditing ? localZones : storeZones;
+      const floorZones = currentZones.filter(z => {
+        if (z.floor) return z.floor === floorId;
+        if (floorId === '1' && !z.floor) return true;
+        return false;
+      });
+      
+      let centerX = 500;
+      let centerY = 500;
+      
+      if (floorZones.length > 0) {
+        const minX = Math.min(...floorZones.map(z => z.left));
+        const maxX = Math.max(...floorZones.map(z => z.left + z.width));
+        const minY = Math.min(...floorZones.map(z => z.top));
+        const maxY = Math.max(...floorZones.map(z => z.top + z.height));
+        centerX = (minX + maxX) / 2;
+        centerY = (minY + maxY) / 2;
+      }
+      
+      const targetX = (floorIndex * FLOOR_SPACING) + centerX;
+      const targetY = centerY; 
+      
+      const newZoom = 0.7; // Slightly zoomed out
+      setZoom(newZoom);
       
       setPan({ 
-        x: (containerRect.width / 2) - ((targetX + 1000) * zoom), 
-        y: (containerRect.height / 2) - ((targetY + 500) * zoom) 
+        x: (containerRect.width / 2) - (targetX * newZoom), 
+        y: (containerRect.height / 2) - (targetY * newZoom) 
       });
     }
   };
@@ -658,7 +679,14 @@ export default function FloorPlanCanvas({ fullBleed = false }) {
                         </div>
 
                         <button 
-                          onClick={(e) => { e.stopPropagation(); setStatusPopupId(null); }}
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            if (activeIncident && activeIncident.dispatchSuggestion) {
+                              setDispatchResult(activeIncident.dispatchSuggestion, activeIncident.id);
+                              confirmDispatch();
+                            }
+                            setStatusPopupId(null); 
+                          }}
                           style={{ width: '100%', padding: '10px', background: color, color: 'white', borderRadius: 10, border: 'none', fontWeight: 900, cursor: 'pointer', fontSize: 10, letterSpacing: 1 }}
                         >
                           DEPLOY ASSETS
@@ -704,7 +732,7 @@ export default function FloorPlanCanvas({ fullBleed = false }) {
       <div style={{ position: 'absolute', bottom: 24, right: 24, zIndex: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
         <button onClick={() => setZoom(z => Math.min(3, z + 0.2))} style={{ width: 40, height: 40, background: 'rgba(39,39,42,0.9)', color: 'white', borderRadius: '50%', border: '1px solid var(--color-border)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>+</button>
         <button onClick={() => setZoom(z => Math.max(0.2, z - 0.2))} style={{ width: 40, height: 40, background: 'rgba(39,39,42,0.9)', color: 'white', borderRadius: '50%', border: '1px solid var(--color-border)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>-</button>
-        <button onClick={() => { setPan({x:0, y:0}); setZoom(1); }} style={{ width: 40, height: 40, background: 'rgba(39,39,42,0.9)', color: 'white', borderRadius: '50%', border: '1px solid var(--color-border)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🎯</button>
+        <button onClick={() => focusOnFloor(currentFloor)} style={{ width: 40, height: 40, background: 'rgba(39,39,42,0.9)', color: 'white', borderRadius: '50%', border: '1px solid var(--color-border)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>🎯</button>
       </div>
 
       {/* ── Floor Management (Left Side) ── */}

@@ -1,11 +1,12 @@
 import { create } from 'zustand';
 import { createIncident } from '../models/incident';
 import { analyzeIncident, getSopSteps } from '../services/geminiService';
+import { sanitizeText } from '../services/dlpService';
 import {
   mergeOrCreateIncident, saveIncidentToHistory, findNearestResponder,
   confirmDispatch as fbConfirmDispatch, resolveLiveIncident,
   seedStaffIfEmpty, streamLiveIncidents, streamZones, saveZonesToFirebase,
-  updateIncident
+  updateIncident, streamEvacuationStatus, triggerEvacuation
 } from '../services/firebaseService';
 
 // ── Zustand store — replaces all Riverpod providers ──────────────────────────
@@ -33,6 +34,13 @@ const useIncidentStore = create((set, get) => ({
   incidentsLoading: true,
   incidentsError: null,
   unsubscribeLiveIncidents: null,
+
+  // Global Evacuation
+  isEvacuationActive: false,
+  unsubscribeEvacuation: null,
+  setEvacuationActive: async (isActive) => {
+    await triggerEvacuation(isActive);
+  },
 
   // Individual incident processing state
   isProcessing: false,
@@ -86,7 +94,7 @@ const useIncidentStore = create((set, get) => ({
 
   // ── Initialize: seed staff + start live streams ───────────────────────────
   init: async () => {
-    // await seedStaffIfEmpty(); // Disable auto-seeding for clean state
+    await seedStaffIfEmpty();
     const unsubscribeLive = streamLiveIncidents((incidents) => {
       const { selectedIncidentId, focusedIncidentId } = get();
       const currentId = selectedIncidentId || focusedIncidentId;
@@ -111,21 +119,45 @@ const useIncidentStore = create((set, get) => ({
       const uniqueFloors = [...new Set(['1', ...discoveredFloors])].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
       set({ zones, floors: uniqueFloors });
     });
-    set({ unsubscribeLiveIncidents: unsubscribeLive, unsubscribeZones: unsubscribeZ });
+    const unsubscribeEvac = streamEvacuationStatus((isActive) => {
+      set({ isEvacuationActive: isActive });
+    });
+    set({ 
+      unsubscribeLiveIncidents: unsubscribeLive, 
+      unsubscribeZones: unsubscribeZ,
+      unsubscribeEvacuation: unsubscribeEvac 
+    });
   },
 
   cleanup: () => {
-    const { unsubscribeLiveIncidents, unsubscribeZones } = get();
+    const { unsubscribeLiveIncidents, unsubscribeZones, unsubscribeEvacuation } = get();
     if (unsubscribeLiveIncidents) unsubscribeLiveIncidents();
     if (unsubscribeZones) unsubscribeZones();
+    if (unsubscribeEvacuation) unsubscribeEvacuation();
   },
 
-  // ── processIncidentData — port of IncidentNotifier.processIncidentData ───
+  // ── processIncidentData — ROBUST pipeline with Gemini fallback ───────────
   processIncidentData: async (transcript, imageBase64 = null) => {
     set({ isProcessing: true, processingError: null, sopSteps: [] });
     try {
-      // 1. Gemini multi-modal analysis
-      const result = await analyzeIncident(transcript, imageBase64);
+      // 0. DLP sanitization — strip PII before analysis
+      const { sanitized: cleanTranscript } = sanitizeText(transcript);
+
+      let result = null;
+      let aiWorked = false;
+
+      // 1. Try Gemini multi-modal analysis — with fallback
+      try {
+        result = await analyzeIncident(cleanTranscript, imageBase64);
+        aiWorked = true;
+        console.log('[STORE] Gemini analysis succeeded:', result);
+      } catch (aiError) {
+        console.warn('[STORE] Gemini analysis failed, using local fallback:', aiError.message);
+        // Fallback: parse the transcript locally
+        result = localFallbackAnalysis(cleanTranscript);
+      }
+
+      const { sanitized: cleanDesc } = sanitizeText(result.description ?? cleanTranscript);
       const location = result.location ?? 'Unknown Location';
       const incidentFloor = extractFloor(location);
       const skills = result.skills_needed ?? [];
@@ -135,34 +167,53 @@ const useIncidentStore = create((set, get) => ({
         type: result.hazard ?? 'other',
         severity: result.severity ?? 5,
         location,
-        description: result.description ?? transcript,
+        description: cleanDesc,
         requiredSkills: skills,
-        evidenceLogs: [transcript],
+        evidenceLogs: [cleanTranscript],
       });
 
-      // 3. Cluster: merge or create
+      // 3. Cluster: merge or create — ALWAYS writes to RTDB
       const finalIncident = await mergeOrCreateIncident(incoming);
+      console.log('[STORE] Incident saved to RTDB:', finalIncident.id);
 
       // 4. Save to Firestore history
-      await saveIncidentToHistory(finalIncident);
-
-      // 5. Dispatch engine
-      const { zones } = get();
-      const dispatchStr = await findNearestResponder(skills, incidentFloor, location, zones);
-      if (dispatchStr) {
-        set({ dispatchResult: dispatchStr, dispatchIncidentId: finalIncident.id });
-        // PERSIST to DB
-        await updateIncident(finalIncident.id, { dispatchSuggestion: dispatchStr });
+      // 4. Save to Firestore history
+      try {
+        await saveIncidentToHistory(finalIncident);
+      } catch (histErr) {
+        console.warn('[STORE] History save failed (non-critical):', histErr.message);
       }
 
-      // 6. SOP RAG
-      const sopSteps = await getSopSteps(finalIncident.type, location);
-      set({ sopSteps, isProcessing: false });
-      // PERSIST to DB
-      await updateIncident(finalIncident.id, { sops: sopSteps });
+      // 5. Dispatch engine
+      try {
+        const { zones } = get();
+        const dispatchStr = await findNearestResponder(skills, incidentFloor, location, zones);
+        if (dispatchStr) {
+          set({ dispatchResult: dispatchStr, dispatchIncidentId: finalIncident.id });
+          // PERSIST to DB
+          await updateIncident(finalIncident.id, { dispatchSuggestion: dispatchStr });
+        }
+      } catch (dispErr) {
+        console.warn('[STORE] Auto-dispatch failed (non-critical):', dispErr.message);
+      }
+
+      // 6. SOP RAG (only if AI worked)
+      if (aiWorked) {
+        try {
+          const sopSteps = await getSopSteps(finalIncident.type, location);
+          set({ sopSteps, isProcessing: false });
+          // PERSIST to DB
+          await updateIncident(finalIncident.id, { sops: sopSteps });
+        } catch (sopErr) {
+          console.warn('[STORE] SOP fetch failed:', sopErr.message);
+          set({ isProcessing: false });
+        }
+      } else {
+        set({ isProcessing: false });
+      }
 
     } catch (e) {
-      console.error('[STORE] processIncidentData error:', e);
+      console.error('[STORE] processIncidentData CRITICAL error:', e);
       set({ isProcessing: false, processingError: e.message });
     }
   },
@@ -262,6 +313,65 @@ function extractFloor(location) {
   if (lower.includes('basement') || lower.includes('b1') || lower.includes('b2')) return 0;
   if (lower.includes('lobby') || lower.includes('ground') || lower.includes('kitchen')) return 1;
   return 1;
+}
+
+// ── Local Fallback Analysis (when Gemini is unavailable) ─────────────────────
+function localFallbackAnalysis(transcript) {
+  const lower = transcript.toLowerCase();
+
+  // Detect hazard type from keywords
+  let hazard = 'other';
+  let severity = 4;
+  const skills = [];
+
+  if (lower.includes('fire') || lower.includes('smoke') || lower.includes('burn')) {
+    hazard = 'fire'; severity = 8; skills.push('Fire Fighting', 'Emergency Evacuation');
+  } else if (lower.includes('medical') || lower.includes('heart') || lower.includes('bleed') || lower.includes('unconscious') || lower.includes('injury')) {
+    hazard = 'medical'; severity = 7; skills.push('CPR', 'First Aid', 'Medical Emergency');
+  } else if (lower.includes('security') || lower.includes('threat') || lower.includes('intruder') || lower.includes('weapon')) {
+    hazard = 'security'; severity = 7; skills.push('Security', 'Emergency Evacuation');
+  } else if (lower.includes('gas') || lower.includes('chemical') || lower.includes('smell')) {
+    hazard = 'chemical'; severity = 7; skills.push('Hazmat', 'Gas Safety');
+  } else if (lower.includes('flood') || lower.includes('water')) {
+    hazard = 'leak'; severity = 5; skills.push('Plumbing', 'Leak Control');
+  } else if (lower.includes('plumb') || lower.includes('leak') || lower.includes('tap') || lower.includes('pipe')) {
+    hazard = 'leak'; severity = 3; skills.push('Plumbing', 'Leak Control');
+  } else if (lower.includes('electric') || lower.includes('power') || lower.includes('outage') || lower.includes('spark')) {
+    hazard = 'other'; severity = 4; skills.push('Electrician', 'Electrical Safety');
+  } else if (lower.includes('clean') || lower.includes('housekeep') || lower.includes('room service')) {
+    hazard = 'other'; severity = 2; skills.push('Room Cleaning', 'Housekeeping');
+  } else if (lower.includes('ac') || lower.includes('heating') || lower.includes('hvac') || lower.includes('cold') || lower.includes('hot')) {
+    hazard = 'other'; severity = 2; skills.push('HVAC', 'Maintenance');
+  } else if (lower.includes('structural') || lower.includes('crack') || lower.includes('collapse')) {
+    hazard = 'structural'; severity = 8; skills.push('Structural Engineering', 'Emergency Evacuation');
+  }
+
+  // Extract location from transcript
+  let location = 'Unknown Location';
+  const roomMatch = lower.match(/room\s*(\d+)/);
+  const floorMatch = lower.match(/floor\s*(\d+)/);
+  if (roomMatch && floorMatch) {
+    location = `Room ${roomMatch[1]}, Floor ${floorMatch[1]}`;
+  } else if (roomMatch) {
+    const roomNum = parseInt(roomMatch[1], 10);
+    const fl = Math.floor(roomNum / 100) || 1;
+    location = `Room ${roomMatch[1]}, Floor ${fl}`;
+  } else if (floorMatch) {
+    location = `Floor ${floorMatch[1]}`;
+  }
+
+  return {
+    hazard,
+    severity,
+    location,
+    description: transcript,
+    skills_needed: skills,
+    impacted_zones: [],
+    verified_status: 'local_fallback',
+    confidence_score: 0.5,
+    estimated_affected_people: 1,
+    recommended_evacuation_zones: [],
+  };
 }
 
 export default useIncidentStore;

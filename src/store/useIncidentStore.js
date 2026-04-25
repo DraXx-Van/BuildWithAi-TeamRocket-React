@@ -121,7 +121,7 @@ const useIncidentStore = create((set, get) => ({
   },
 
   // ── processIncidentData — port of IncidentNotifier.processIncidentData ───
-  processIncidentData: async (transcript, imageBase64 = null) => {
+  processIncidentData: async (transcript, imageBase64 = null, reporterName = null) => {
     set({ isProcessing: true, processingError: null, sopSteps: [] });
     try {
       // 1. Gemini multi-modal analysis
@@ -138,6 +138,7 @@ const useIncidentStore = create((set, get) => ({
         description: result.description ?? transcript,
         requiredSkills: skills,
         evidenceLogs: [transcript],
+        reporterName,
       });
 
       // 3. Cluster: merge or create
@@ -164,6 +165,32 @@ const useIncidentStore = create((set, get) => ({
     } catch (e) {
       console.error('[STORE] processIncidentData error:', e);
       set({ isProcessing: false, processingError: e.message });
+    }
+  },
+
+  // ── appendLogToIncident ───────────────────────────────────────────────────
+  appendLogToIncident: async (incidentId, logMessage, imageBase64 = null) => {
+    set({ isProcessing: true });
+    try {
+      const { liveIncidents } = get();
+      const inc = liveIncidents.find(i => i.id === incidentId);
+      if (inc) {
+        // Prepare new evidence logs
+        const newLogs = [...(inc.evidenceLogs || []), logMessage];
+        
+        // Update via Firebase service
+        await updateIncident(incidentId, { 
+          evidenceLogs: newLogs,
+          signalCount: (inc.signalCount || 1) + 1 
+        });
+        
+        // If image provided, we could theoretically do further analysis,
+        // but for now we just log it as a chat update.
+      }
+      set({ isProcessing: false });
+    } catch (e) {
+      console.error('[STORE] appendLogToIncident error:', e);
+      set({ isProcessing: false });
     }
   },
 

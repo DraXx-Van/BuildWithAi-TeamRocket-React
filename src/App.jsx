@@ -10,11 +10,9 @@ export default function App() {
   const cleanupStore = useIncidentStore(s => s.cleanup);
 
   useEffect(() => {
-    if (appMode === 'orchestrator') {
-      initStore();
-      return () => cleanupStore();
-    }
-  }, [appMode, initStore, cleanupStore]);
+    initStore();
+    return () => cleanupStore();
+  }, [initStore, cleanupStore]);
 
   return (
     <>

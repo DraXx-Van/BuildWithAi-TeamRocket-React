@@ -1,5 +1,6 @@
 import { fullTimestamp, severityColor } from '../../models/incident';
 import StatusBadge from '../incidents/StatusBadge';
+import { AlertCircle } from 'lucide-react';
 
 export default function CaseSummary({ incident }) {
   const color = severityColor(incident.severity);
@@ -13,7 +14,7 @@ export default function CaseSummary({ incident }) {
       {/* Header with Case ID */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div className="step-label">
-          <span className="step-num" style={{ background: color }}>◉</span>
+          <span className="step-num" style={{ background: `${color}20` }}><AlertCircle size={14} color={color} /></span>
           CASE BRIEFING
         </div>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'rgba(255,255,255,0.2)', letterSpacing: 1 }}>

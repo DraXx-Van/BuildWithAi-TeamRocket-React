@@ -48,13 +48,25 @@ export async function mergeOrCreateIncident(incoming) {
 }
 
 function locationMatch(a, b) {
-  const la = a.toLowerCase();
-  const lb = b.toLowerCase();
+  const la = a.toLowerCase().trim();
+  const lb = b.toLowerCase().trim();
   if (la === lb) return true;
-  const wordsA = new Set(la.split(/\W+/).filter(w => w.length > 3));
-  const wordsB = new Set(lb.split(/\W+/).filter(w => w.length > 3));
-  for (const w of wordsA) { if (wordsB.has(w)) return true; }
-  return false;
+  
+  // If either contains a room number, they MUST match exactly
+  const roomA = la.match(/room\s+(\d+)/);
+  const roomB = lb.match(/room\s+(\d+)/);
+  if (roomA && roomB) {
+    return roomA[1] === roomB[1];
+  }
+  
+  // Otherwise, fallback to a stricter overlap (require both words to be unique/specific)
+  const wordsA = new Set(la.split(/\W+/).filter(w => w.length > 4));
+  const wordsB = new Set(lb.split(/\W+/).filter(w => w.length > 4));
+  let matchCount = 0;
+  for (const w of wordsA) { 
+    if (wordsB.has(w)) matchCount++; 
+  }
+  return matchCount > 0 && matchCount >= Math.min(wordsA.size, wordsB.size);
 }
 
 // ── Confirm Dispatch ─────────────────────────────────────────────────────────
@@ -131,6 +143,30 @@ export async function resolveLiveIncident(incidentId) {
   await remove(ref(rtdb, `live_incidents/${incidentId}`));
 }
 
+export async function updateIncidentStatus(incidentId, status) {
+  try {
+    await update(ref(rtdb, `live_incidents/${incidentId}`), { status });
+  } catch (e) {
+    console.error('[STATUS] Update error:', e);
+  }
+}
+
+// ── Evacuation State ──────────────────────────────────────────────────────────
+export async function triggerEvacuation(isActive) {
+  try {
+    await set(ref(rtdb, 'building_status/evacuationActive'), isActive);
+    console.log('[EVAC] Global Evacuation set to:', isActive);
+  } catch (e) {
+    console.error('[EVAC] Failed to trigger evacuation:', e);
+  }
+}
+
+export function streamEvacuationStatus(callback) {
+  return onValue(ref(rtdb, 'building_status/evacuationActive'), (snapshot) => {
+    callback(snapshot.val() === true);
+  });
+}
+
 // ── Live Incidents Stream (RTDB) ─────────────────────────────────────────────
 export function streamLiveIncidents(callback) {
   const liveRef = ref(rtdb, 'live_incidents');
@@ -162,4 +198,122 @@ export async function fetchStaff() {
     console.error('[FIREBASE] fetchStaff error:', e);
     return kSeedStaff;
   }
+}
+
+// ── Add Staff Member ─────────────────────────────────────────────────────────
+export async function addStaffMember(staffData) {
+  const id = `staff_${Date.now()}`;
+  const member = { id, ...staffData, createdAt: new Date().toISOString() };
+  await setDoc(doc(db, 'staff', id), member);
+  console.log('[STAFF] Added:', member.name);
+  return member;
+}
+
+// ── Update Staff Member ──────────────────────────────────────────────────────
+export async function updateStaffMember(id, updates) {
+  await setDoc(doc(db, 'staff', id), { id, ...updates, updatedAt: new Date().toISOString() }, { merge: true });
+  console.log('[STAFF] Updated:', id);
+}
+
+// ── Delete Staff Member ──────────────────────────────────────────────────────
+export async function deleteStaffMember(id) {
+  const { deleteDoc } = await import('firebase/firestore');
+  await deleteDoc(doc(db, 'staff', id));
+  console.log('[STAFF] Deleted:', id);
+}
+
+// ── Stream Staff (Real-time) ─────────────────────────────────────────────────
+export function streamStaff(callback) {
+  return onSnapshot(collection(db, 'staff'), (snap) => {
+    const data = snap.docs.map(d => d.data()).sort((a, b) => a.floor - b.floor);
+    callback(data.length > 0 ? data : kSeedStaff);
+  });
+}
+
+// ── Find Ranked Staff Candidates for Dispatch ────────────────────────────────
+export async function findRankedCandidates(requiredSkills, incidentFloor, dangerZoneFloors = []) {
+  if (!requiredSkills || requiredSkills.length === 0) return [];
+  try {
+    const snap = await getDocs(query(collection(db, 'staff'), where('isAvailable', '==', true)));
+    if (snap.empty) return [];
+
+    const all = snap.docs.map(d => d.data());
+
+    return all.map(staff => {
+      const staffSkills = staff.skills.map(s => s.toLowerCase());
+      const normalised = requiredSkills.map(s => s.toLowerCase());
+      let matchCount = 0;
+      for (const need of normalised) {
+        if (staffSkills.some(have => have.includes(need) || need.includes(have))) matchCount++;
+      }
+      const matchScore = Math.round((matchCount / normalised.length) * 100);
+      const floorDist = Math.abs(staff.floor - incidentFloor);
+      const isInDangerZone = dangerZoneFloors.includes(staff.floor);
+
+      return {
+        ...staff,
+        matchScore,
+        floorDist,
+        isInDangerZone,
+        eta: getEta(staff.floor, incidentFloor),
+        // Composite rank: skill match (50%) + proximity (30%) + safety (20%)
+        rank: matchScore * 0.5 + (1 - floorDist / 5) * 30 + (isInDangerZone ? 0 : 20),
+      };
+    })
+    .filter(s => !s.isInDangerZone) // NON-SACRIFICE DIRECTIVE: never send staff into danger zones
+    .sort((a, b) => b.rank - a.rank);
+  } catch (e) {
+    console.error('[DISPATCH] Ranked candidates error:', e);
+    return [];
+  }
+}
+
+// ── Manual Staff Assignment (Manager picks from candidates) ──────────────────
+export async function assignStaffToIncident(incidentId, staffMember, location, description) {
+  const now = new Date().toISOString();
+
+  // 1. Update the incident in RTDB
+  await update(ref(rtdb, `live_incidents/${incidentId}`), {
+    status: 'dispatched',
+    assignedTo: staffMember.name,
+    assignedStaffId: staffMember.id,
+    assignedStaffPhotoUrl: staffMember.photoUrl || null,
+    dispatchedAt: now,
+  });
+
+  // 2. Push dispatch alert to staff member
+  await set(ref(rtdb, `dispatches/${staffMember.name}`), {
+    incidentId,
+    location: location || 'See floor plan',
+    description: description || 'Respond to incident',
+    dispatchedAt: now,
+    staffId: staffMember.id,
+    staffName: staffMember.name,
+  });
+
+  // 3. Mark staff as unavailable
+  await setDoc(doc(db, 'staff', staffMember.id), { isAvailable: false }, { merge: true });
+
+  console.log('[DISPATCH] Assigned', staffMember.name, 'to', incidentId);
+}
+
+// ── Release Staff After Incident ─────────────────────────────────────────────
+export async function releaseStaff(staffId, staffName) {
+  await setDoc(doc(db, 'staff', staffId), { isAvailable: true }, { merge: true });
+  await remove(ref(rtdb, `dispatches/${staffName}`));
+  console.log('[DISPATCH] Released:', staffName);
+}
+
+// ── Save Room Assignment (for contextual awareness) ──────────────────────────
+export async function setRoomAssignment(userId, roomNumber, floor) {
+  await set(ref(rtdb, `room_assignments/${userId}`), {
+    roomNumber,
+    floor,
+    assignedAt: new Date().toISOString(),
+  });
+}
+
+export async function getRoomAssignment(userId) {
+  const snap = await get(ref(rtdb, `room_assignments/${userId}`));
+  return snap.exists() ? snap.val() : null;
 }

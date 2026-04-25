@@ -1,19 +1,19 @@
-import useIncidentStore from '../../store/useIncidentStore';
+import { Routes, Route } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import DashboardView from '../dashboard/DashboardView';
 import IncidentsPage from '../incidents/IncidentsPage';
 import ResourcesPage from '../resources/ResourcesPage';
 
 export default function DashboardShell() {
-  const currentPage = useIncidentStore(s => s.currentPage);
-
   return (
     <div className="app-shell">
       <Sidebar />
       <main className="main-content">
-        {currentPage === 'dashboard' && <DashboardView />}
-        {currentPage === 'incidents' && <IncidentsPage />}
-        {currentPage === 'resources' && <ResourcesPage />}
+        <Routes>
+          <Route index element={<DashboardView />} />
+          <Route path="incidents" element={<IncidentsPage />} />
+          <Route path="resources" element={<ResourcesPage />} />
+        </Routes>
       </main>
     </div>
   );

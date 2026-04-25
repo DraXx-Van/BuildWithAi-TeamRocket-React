@@ -1,36 +1,90 @@
-import { fullTimestamp } from '../../models/incident';
+import { useState } from 'react';
+
+const CLEAN_PATTERNS = [
+  /hellothere/gi,
+  /smith mendes/gi,
+  /we need immediate help/gi,
+  /\b(regards|best|thanks)\b.*$/gi
+];
+
+function cleanSignal(text) {
+  let cleaned = text;
+  CLEAN_PATTERNS.forEach(pattern => {
+    cleaned = cleaned.replace(pattern, '');
+  });
+  return cleaned.trim() || text;
+}
+
+const SOURCES = ['VOICE RECON', 'SENSOR MESH', 'NEURAL LINK', 'OPERATOR OVERRIDE'];
 
 export default function SignalIntel({ incident }) {
   const logs = incident.evidenceLogs ?? [];
+  
   return (
-    <div className="card flex-col gap-16">
-      <div className="step-label">
-        <span className="step-num">📡</span>
-        SIGNAL INTELLIGENCE
+    <div className="card flex-col gap-20" style={{ background: 'rgba(15,15,20,0.4)', backdropFilter: 'blur(10px)', border: '1px solid rgba(139, 92, 246, 0.1)' }}>
+      <div className="step-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="step-num" style={{ background: 'var(--color-primary)', animation: 'pulse 2s infinite' }}>📡</span>
+          <span style={{ letterSpacing: 3, fontWeight: 800 }}>SIGNAL INTELLIGENCE</span>
+        </div>
+        <div style={{ fontSize: 8, color: 'var(--color-text-mid)', fontFamily: 'var(--font-mono)' }}>ENCRYPTED CHANNEL 7-A</div>
       </div>
+
       {logs.length === 0 ? (
-        <div style={{ color: 'var(--color-text-mid)', fontSize: 12 }}>No signals recorded.</div>
+        <div style={{ padding: '40px 0', textAlign: 'center', color: 'rgba(255,255,255,0.1)', fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: 1 }}>
+          SEARCHING FOR SIGNALS...
+        </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {logs.map((log, i) => (
-            <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-              {/* Timeline dot */}
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 3 }}>
-                <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--color-primary)', flexShrink: 0 }} />
-                {i < logs.length - 1 && <div style={{ width: 1, flex: 1, minHeight: 16, background: 'var(--color-border)', marginTop: 4 }} />}
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--color-text-mid)', letterSpacing: 1, marginBottom: 3 }}>
-                  SIGNAL #{i + 1}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {logs.map((log, i) => {
+            const source = SOURCES[i % SOURCES.length];
+            const cleanedText = cleanSignal(log);
+            
+            return (
+              <div key={i} className="signal-entry" style={{ 
+                display: 'flex', gap: 16, 
+                background: 'rgba(255,255,255,0.02)', 
+                padding: '12px 16px', borderRadius: 12, 
+                border: '1px solid rgba(255,255,255,0.03)',
+                position: 'relative',
+                overflow: 'hidden'
+              }}>
+                {/* Source Indicator */}
+                <div style={{ 
+                  width: 3, height: '70%', background: i === 0 ? 'var(--color-primary)' : 'rgba(255,255,255,0.1)', 
+                  position: 'absolute', left: 0, top: '15%', borderRadius: '0 4px 4px 0' 
+                }} />
+
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--color-primary)', fontWeight: 800, letterSpacing: 1.5 }}>
+                      {source} — SIG #{i + 1}
+                    </div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 8, color: 'rgba(255,255,255,0.2)' }}>
+                      DECRYPTED AT 14:24:{45 + i}
+                    </div>
+                  </div>
+                  <div style={{ 
+                    fontSize: 13, color: 'white', lineHeight: 1.5, 
+                    fontFamily: 'var(--font-mono)', letterSpacing: -0.2,
+                    fontWeight: 500
+                  }}>
+                    <span style={{ opacity: 0.3, marginRight: 8 }}>&gt;</span>
+                    {cleanedText}
+                  </div>
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--color-text-hi)', lineHeight: 1.6, background: 'rgba(39,39,42,0.6)', border: '1px solid var(--color-border)', borderRadius: 6, padding: '8px 12px' }}>
-                  {log}
-                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
+
+      {/* Footer Visuals */}
+      <div style={{ display: 'flex', gap: 4, height: 2, marginTop: 4 }}>
+        {[...Array(20)].map((_, i) => (
+          <div key={i} style={{ flex: 1, background: `rgba(139, 92, 246, ${Math.random() * 0.3})` }} />
+        ))}
+      </div>
     </div>
   );
 }

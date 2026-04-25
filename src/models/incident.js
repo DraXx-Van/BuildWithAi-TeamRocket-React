@@ -10,6 +10,7 @@ export function createIncident({
   status = 'active', timestamp, requiredSkills = [],
   sopUrl, imageUrl, metaData, assignedTo, dispatchedAt,
   evidenceLogs = [], signalCount = 1,
+  sops = [], dispatchSuggestion = null,
 } = {}) {
   return {
     id:            id ?? uuidv4(),
@@ -27,6 +28,8 @@ export function createIncident({
     dispatchedAt:  dispatchedAt ?? null,
     evidenceLogs,
     signalCount,
+    sops,
+    dispatchSuggestion,
   };
 }
 
@@ -48,6 +51,8 @@ export function incidentFromJson(json) {
     dispatchedAt:  json.dispatchedAt ?? null,
     evidenceLogs:  json.evidenceLogs ?? [],
     signalCount:   json.signalCount ?? 1,
+    sops:          json.sops ?? [],
+    dispatchSuggestion: json.dispatchSuggestion ?? null,
   });
 }
 

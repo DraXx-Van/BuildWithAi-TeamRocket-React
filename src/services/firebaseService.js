@@ -22,10 +22,11 @@ export async function mergeOrCreateIncident(incoming) {
       for (const key of Object.keys(data)) {
         const existing = incidentFromJson(data[key]);
         const sameLocation = locationMatch(existing.location, incoming.location);
+        const sameType = existing.type === incoming.type;
         const recent = existing.timestamp >= cutoff;
         const notResolved = existing.status === 'active' || existing.status === 'dispatched';
 
-        if (sameLocation && recent && notResolved) {
+        if (sameLocation && sameType && recent && notResolved) {
           console.log('[CLUSTER] Merging signal into existing incident', existing.id);
           const merged = incidentCopyWith(existing, {
             severity: incoming.severity > existing.severity ? incoming.severity : existing.severity,
@@ -51,9 +52,19 @@ function locationMatch(a, b) {
   const la = a.toLowerCase();
   const lb = b.toLowerCase();
   if (la === lb) return true;
-  const wordsA = new Set(la.split(/\W+/).filter(w => w.length > 3));
-  const wordsB = new Set(lb.split(/\W+/).filter(w => w.length > 3));
-  for (const w of wordsA) { if (wordsB.has(w)) return true; }
+  
+  // Extract specific room/zone names (e.g. BAR, ASSEMBLY, LOBBY)
+  // We ignore common words like 'floor', 'room', 'area', 'near'
+  const ignore = new Set(['floor', 'room', 'area', 'near', 'side', 'hall', 'first', 'second', 'third']);
+  const wordsA = la.split(/\W+/).filter(w => w.length >= 3 && !ignore.has(w));
+  const wordsB = lb.split(/\W+/).filter(w => w.length >= 3 && !ignore.has(w));
+  
+  if (wordsA.length === 0 || wordsB.length === 0) return la.includes(lb) || lb.includes(la);
+
+  // Must have at least one specific keyword match (like 'BAR' or 'ASSEMBLY')
+  for (const w of wordsA) { 
+    if (wordsB.includes(w)) return true; 
+  }
   return false;
 }
 
@@ -96,33 +107,74 @@ export async function seedStaffIfEmpty() {
 }
 
 // ── Find Nearest Responder ───────────────────────────────────────────────────
-export async function findNearestResponder(requiredSkills, incidentFloor) {
+export async function findNearestResponder(requiredSkills, incidentFloor, incidentLocation = '', currentZones = []) {
   if (!requiredSkills || requiredSkills.length === 0) return null;
   try {
     console.log('[DISPATCH] Finding responder for', requiredSkills, 'near floor', incidentFloor);
     const snap = await getDocs(query(collection(db, 'staff'), where('isAvailable', '==', true)));
-    if (snap.empty) return null;
+    let all = snap.empty ? [] : snap.docs.map(d => d.data());
 
-    const all = snap.docs.map(d => d.data());
     const normalised = requiredSkills.map(s => s.toLowerCase());
-
     let matched = all.filter(staff => {
       const staffSkills = staff.skills.map(s => s.toLowerCase());
       return normalised.some(needed => staffSkills.some(have => have.includes(needed) || needed.includes(have)));
     });
 
     if (matched.length === 0) {
-      const fallback = all[0];
-      return `${fallback.name} (${fallback.role}, Floor ${fallback.floor}) — ${getEta(fallback.floor)}`;
+      console.log('[DISPATCH] No exact match. Falling back to all staff.');
+      matched = all;
     }
 
-    matched.sort((a, b) => Math.abs(a.floor - incidentFloor) - Math.abs(b.floor - incidentFloor));
+    // 1. Try to locate the incident on the 2D grid
+    const lowerLoc = incidentLocation.toLowerCase();
+    const incidentZone = currentZones.find(z => lowerLoc.includes(z.label.toLowerCase()) || lowerLoc.includes(z.id.toLowerCase()));
+
+    // 2. Helper to calculate 2D distance score
+    const getDistanceScore = (responder) => {
+      if (incidentZone) {
+        const rZone = currentZones.find(z => z.id === responder.zoneId);
+        if (rZone) {
+          const dx = (rZone.left + rZone.width / 2) - (incidentZone.left + incidentZone.width / 2);
+          const dy = (rZone.top + rZone.height / 2) - (incidentZone.top + incidentZone.height / 2);
+          return Math.sqrt(dx * dx + dy * dy);
+        }
+      }
+      return Math.abs(responder.floor - incidentFloor) * 200; // Fallback: 1 floor diff = 200px equivalent
+    };
+
+    // 3. Helper to format ETA
+    const getEtaStr = (responder) => {
+      if (incidentZone) {
+        const rZone = currentZones.find(z => z.id === responder.zoneId);
+        if (rZone) {
+          const distance = getDistanceScore(responder);
+          if (distance < 100) return '1 min (Nearby)';
+          if (distance < 300) return '2-3 mins (Same Wing)';
+          return '4+ mins (Walking)';
+        }
+      }
+      const diff = Math.abs(responder.floor - incidentFloor);
+      if (diff === 0) return '1-2 mins';
+      if (diff <= 2) return '3-4 mins';
+      return '5+ mins';
+    };
+
+    matched.sort((a, b) => getDistanceScore(a) - getDistanceScore(b));
     const best = matched[0];
-    console.log('[DISPATCH] Best match:', best.name, 'on Floor', best.floor);
-    return `${best.name} (Floor ${best.floor}) — ${getEta(best.floor)}`;
+    console.log('[DISPATCH] Best match:', best.name, 'via 2D Distance');
+    return `${best.name} (${best.role}) — ${getEtaStr(best)}`;
   } catch (e) {
     console.error('[DISPATCH] Error:', e);
     return null;
+  }
+}
+
+// ── Update Incident (Generic) ────────────────────────────────────────────────
+export async function updateIncident(incidentId, updates) {
+  try {
+    await update(ref(rtdb, `live_incidents/${incidentId}`), updates);
+  } catch (e) {
+    console.error('[FIREBASE] updateIncident error:', e);
   }
 }
 
@@ -156,10 +208,22 @@ export function streamDispatchForStaff(staffName, callback) {
 export async function fetchStaff() {
   try {
     const snap = await getDocs(query(collection(db, 'staff')));
-    if (snap.empty) return kSeedStaff;
+    if (snap.empty) return [];
     return snap.docs.map(d => d.data()).sort((a, b) => a.floor - b.floor);
   } catch (e) {
     console.error('[FIREBASE] fetchStaff error:', e);
     return kSeedStaff;
   }
+}
+
+// ── Floor Plan Zones ─────────────────────────────────────────────────────────
+export function streamZones(callback) {
+  const zonesRef = ref(rtdb, 'config/zones');
+  return onValue(zonesRef, (snapshot) => {
+    callback(snapshot.exists() ? snapshot.val() : null);
+  });
+}
+
+export async function saveZonesToFirebase(zones) {
+  await set(ref(rtdb, 'config/zones'), zones);
 }

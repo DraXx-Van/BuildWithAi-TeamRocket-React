@@ -411,3 +411,19 @@ html, body, #root {
 .w-full { width: 100%; }
 .overflow-hidden { overflow: hidden; }
 .text-ellipsis { text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
+
+/* ── Animations ───────────────────────────────────────────────────────────── */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.animate-spin {
+  animation: spin 1s linear infinite;
+  display: inline-block;
+}
+
+@keyframes pulseAlert {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.1); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 1; }
+}

@@ -74,3 +74,56 @@ Example: ["Step 1.", "Step 2.", "Step 3."]`;
     ];
   }
 }
+
+// ── analyzeBlueprint — AI Blueprint Scanner ───────────────────────────────
+export async function analyzeBlueprint(imageBase64) {
+  const model = genAI.getGenerativeModel({ 
+    model: 'gemini-2.5-flash',
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "ARRAY",
+        items: {
+          type: "OBJECT",
+          properties: {
+            id: { type: "STRING", description: "Unique snake_case id" },
+            label: { type: "STRING", description: "ALL CAPS name, e.g. 'MAIN LOBBY'" },
+            subtitle: { type: "STRING", description: "Specific room details" },
+            floor: { type: "STRING", description: "The floor ID (e.g. '1', '2', 'B1'). If multiple plans are in image, group them correctly." },
+            type: { type: "STRING", enum: ["room", "path", "stair", "elevator", "exit", "entry"], description: "Architectural function" },
+            left: { type: "INTEGER", description: "X coordinate (0-1000) relative to floor origin" },
+            top: { type: "INTEGER", description: "Y coordinate (0-1000) relative to floor origin" },
+            width: { type: "INTEGER", description: "Width (50-400)" },
+            height: { type: "INTEGER", description: "Height (50-400)" }
+          },
+          required: ["id", "label", "floor", "type", "left", "top", "width", "height"]
+        }
+      }
+    }
+  });
+
+  const prompt = `You are an AI Architectural Analyst for the Aegis Orchestrator. 
+Scan this blueprint/floor plan image and extract all architectural zones.
+
+CRITICAL INSTRUCTIONS:
+1. MULTI-FLOOR DETECTION: If the image contains multiple floor plans, identify which zone belongs to which floor (e.g., '1', '2').
+2. ARCHITECTURAL TYPING: Categorize every zone as one of: room, path, stair, elevator, exit, entry.
+3. COORDINATES: Map each floor to its own relative 1000x1000 coordinate space. (0,0 is the top-left of the specific floor plan).
+4. LABELS: Use concise, professional labels (e.g., 'STAIRWELL A', 'DATA CENTER').`;
+
+  console.log('[GEMINI] Analyzing blueprint image...');
+  const parts = [
+    { text: prompt },
+    { inlineData: { mimeType: 'image/jpeg', data: imageBase64 } } // Use generic jpeg, Gemini handles it
+  ];
+
+  try {
+    const result = await model.generateContent(parts);
+    const raw = result.response.text();
+    console.log('[GEMINI] Blueprint JSON:', raw);
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error('[GEMINI] Error analyzing blueprint:', e);
+    throw e;
+  }
+}

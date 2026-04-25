@@ -3,97 +3,108 @@ import IncidentTile from './IncidentTile';
 import FloorPlanCanvas from './FloorPlanCanvas';
 
 export default function DashboardView() {
-  const { liveIncidents, incidentsLoading, dispatchResult } = useIncidentStore();
+  const { liveIncidents, incidentsLoading, dispatchResult, isProcessing, isScanning } = useIncidentStore();
 
-  const totalActive   = liveIncidents.filter(i => i.status === 'active').length;
+  const totalActive = liveIncidents.length;
   const totalCritical = liveIncidents.filter(i => i.severity >= 8).length;
   const totalDispatched = liveIncidents.filter(i => i.status === 'dispatched').length;
 
   return (
-    <div className="flex-col" style={{ height: '100%', overflow: 'hidden' }}>
-      {/* Header */}
-      <div className="page-header">
-        <div>
-          <div className="page-header-title font-display">Command Dashboard</div>
-          <div className="page-header-sub">Real-time incident monitoring & dispatch</div>
+    <div style={{ display: 'flex', height: '100vh', width: '100%', overflow: 'hidden', background: 'var(--color-bg)' }}>
+      
+      {/* Center Column: Floor Plan Canvas (Full Height) */}
+      <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column' }}>
+        
+        {/* Floating Header / Metrics */}
+        <div style={{ position: 'absolute', top: 32, left: 32, zIndex: 10, display: 'flex', gap: 16 }}>
+          <MetricCard label="ACTIVE ALERTS" value={totalActive < 10 && totalActive > 0 ? '0' + totalActive : totalActive} valueColor="var(--color-primary)" />
+          <MetricCard label="ASSETS DEPLOYED" value={totalDispatched < 10 && totalDispatched > 0 ? '0' + totalDispatched : totalDispatched} valueColor="white" />
         </div>
-        <div className="live-badge">
-          <div className="live-dot" />
-          LIVE
-        </div>
-      </div>
 
-      <div className="page-body flex-col gap-24" style={{ overflow: 'auto' }}>
-        {/* Dispatch Banner */}
+        {/* Floating Dispatch Banner */}
         {dispatchResult && (
-          <div className="dispatch-banner">
-            <span style={{ fontSize: 20 }}>🚀</span>
+          <div style={{ position: 'absolute', top: 32, right: 32, zIndex: 10, padding: '16px 24px', background: 'rgba(16,185,129,0.1)', border: '1px solid var(--color-success)', borderRadius: 'var(--radius-md)', backdropFilter: 'blur(12px)', display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{ fontSize: 24 }}>🚀</div>
             <div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--color-success)', letterSpacing: 2, marginBottom: 3 }}>RESPONDER DISPATCHED</div>
-              <div style={{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 600, color: 'var(--color-text-hi)' }}>{dispatchResult}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--color-success)', fontWeight: 700, letterSpacing: 1.5, marginBottom: 4 }}>RESPONDER DISPATCHED</div>
+              <div style={{ color: 'white', fontWeight: 600, fontSize: 14 }}>{dispatchResult}</div>
             </div>
           </div>
         )}
 
-        {/* Main Dashboard Layout: 2 Columns */}
-        <div style={{ display: 'flex', gap: 24, flex: 1, overflow: 'hidden' }}>
-          
-          {/* Left Column: Feed & Metrics */}
-          <div style={{ flex: '0 0 450px', display: 'flex', flexDirection: 'column', gap: 24, overflowY: 'auto', paddingRight: 12 }}>
-            {/* Metric cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-              <MetricCard label="ACTIVE" value={totalActive} valueColor="var(--color-error)" />
-              <MetricCard label="CRITICAL" value={totalCritical} valueColor="var(--color-warning)" />
-              <MetricCard label="DISPATCHED" value={totalDispatched} valueColor="var(--color-success)" />
+        {/* Global AI Processing Status */}
+        {(isProcessing || isScanning) && (
+          <div style={{ position: 'absolute', bottom: 32, left: '50%', transform: 'translateX(-50%)', zIndex: 100, padding: '12px 24px', background: 'rgba(139, 92, 246, 0.15)', border: '1px solid var(--color-primary)', borderRadius: 100, backdropFilter: 'blur(16px)', display: 'flex', alignItems: 'center', gap: 12, boxShadow: '0 8px 32px rgba(139, 92, 246, 0.2)', animation: 'slideUp 0.4s ease-out' }}>
+            <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--color-primary)', boxShadow: '0 0 10px var(--color-primary)', animation: 'pulse 1.5s infinite' }} />
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'white', fontWeight: 600, letterSpacing: 1 }}>
+              {isScanning ? 'GEMINI IS RECONSTRUCTING BLUEPRINT...' : 'GEMINI IS ANALYZING TACTICAL DATA...'}
             </div>
-
-            {/* Live Feed */}
-            <div style={{ flex: 1 }}>
-              <div className="flex items-center justify-between" style={{ marginBottom: 16 }}>
-                <div style={{ fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 600, color: 'var(--color-text-hi)' }}>Live Incident Feed</div>
-              </div>
-
-              {incidentsLoading ? (
-                <div className="flex items-center justify-center" style={{ padding: 40 }}>
-                  <Spinner />
-                </div>
-              ) : liveIncidents.length === 0 ? (
-                <div className="flex-col items-center" style={{ padding: 60, gap: 12, alignItems: 'center' }}>
-                  <div style={{ fontSize: 40 }}>✅</div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'rgba(255,255,255,0.15)', letterSpacing: 3 }}>STANDBY</div>
-                </div>
-              ) : (
-                liveIncidents.map(i => <IncidentTile key={i.id} incident={i} />)
-              )}
-            </div>
+            <style>{`
+              @keyframes slideUp { from { transform: translate(-50%, 20px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+              @keyframes pulse { 0% { opacity: 0.4; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.2); } 100% { opacity: 0.4; transform: scale(0.8); } }
+            `}</style>
           </div>
+        )}
 
-          {/* Right Column: Floor Plan Canvas */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--color-text-mid)', letterSpacing: 2, fontWeight: 600 }}>TACTICAL BLUEPRINT</div>
-              <div style={{ padding: '4px 12px', background: 'rgba(139,92,246,0.1)', color: 'var(--color-primary)', borderRadius: 12, fontSize: 10, fontFamily: 'var(--font-mono)' }}>CONNECT AI LIVE</div>
-            </div>
-            <div style={{ flex: 1, minHeight: 400 }}>
-              <FloorPlanCanvas />
-            </div>
-          </div>
-
+        <div style={{ flex: 1, position: 'relative' }}>
+          <FloorPlanCanvas fullBleed={true} />
         </div>
       </div>
+
+      {/* Right Column: Live Incident Feed */}
+      <div style={{ width: 400, background: 'var(--color-surface-1)', borderLeft: '1px solid var(--color-border)', display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div style={{ padding: '32px 24px 16px 24px' }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, color: 'var(--color-text-hi)', letterSpacing: 1.5, marginBottom: 16 }}>LIVE INCIDENT FEED</div>
+          <div className="flex gap-8">
+            {['All', 'Critical', 'Warning'].map(f => (
+              <span key={f} style={{ padding: '6px 16px', borderRadius: 20, background: f === 'All' ? 'var(--color-primary)' : 'var(--color-surface-2)', color: f === 'All' ? 'white' : 'var(--color-text-mid)', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600, cursor: 'pointer' }}>
+                {f}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0 24px 24px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {incidentsLoading ? (
+            <div className="flex items-center justify-center" style={{ padding: 40 }}>
+              <Spinner />
+            </div>
+          ) : liveIncidents.length === 0 ? (
+            <div className="flex-col items-center justify-center" style={{ padding: 60, gap: 16, alignItems: 'center', flex: 1, display: 'flex' }}>
+              <div style={{ fontSize: 40, opacity: 0.5 }}>🛡️</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--color-text-mid)', letterSpacing: 2 }}>STANDBY</div>
+            </div>
+          ) : (
+            liveIncidents.map(i => <IncidentTile key={i.id} incident={i} />)
+          )}
+        </div>
+      </div>
+
     </div>
   );
 }
 
 function MetricCard({ label, value, valueColor }) {
   return (
-    <div style={{ background: 'rgba(39,39,42,0.7)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 'var(--radius-md)', padding: 20, backdropFilter: 'blur(12px)' }}>
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--color-text-mid)', fontWeight: 600, letterSpacing: 1.5, marginBottom: 6 }}>{label}</div>
-      <div style={{ fontFamily: 'var(--font-display)', fontSize: 36, fontWeight: 700, color: valueColor, lineHeight: 1 }}>{value}</div>
+    <div style={{ 
+      background: 'rgba(39,39,42,0.85)', 
+      backdropFilter: 'blur(10px)',
+      border: '1px solid rgba(255,255,255,0.05)', 
+      borderRadius: 'var(--radius-lg)', 
+      padding: '16px 20px',
+      minWidth: 140,
+      boxShadow: '0 8px 32px rgba(0,0,0,0.2)'
+    }}>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--color-text-mid)', letterSpacing: 1.5, marginBottom: 8 }}>{label}</div>
+      <div style={{ fontFamily: 'var(--font-display)', fontSize: 32, fontWeight: 700, color: valueColor, lineHeight: 1 }}>{value}</div>
     </div>
   );
 }
 
 function Spinner() {
-  return <div style={{ width: 28, height: 28, border: '3px solid var(--color-surface-3)', borderTop: '3px solid var(--color-primary)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />;
+  return (
+    <div style={{ width: 24, height: 24, borderRadius: '50%', border: '2px solid var(--color-surface-3)', borderTopColor: 'var(--color-primary)', animation: 'spin 1s linear infinite' }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
 }

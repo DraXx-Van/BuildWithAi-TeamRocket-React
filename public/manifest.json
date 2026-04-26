@@ -1,0 +1,21 @@
+{
+  "name": "CrisisFlow — Crisis Response Command",
+  "short_name": "CrisisFlow",
+  "description": "Rapid Crisis Response Ecosystem for Hospitality",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0a0f",
+  "theme_color": "#8b5cf6",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [],
+  "prefer_related_applications": false
+}

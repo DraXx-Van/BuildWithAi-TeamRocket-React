@@ -30,6 +30,7 @@ export default function IncidentTile({ incident }) {
         style={{
           position: 'relative',
           marginBottom: 16,
+          flexShrink: 0,
           background: isSelected ? 'rgba(63,63,70,0.4)' : 'rgba(39,39,42,0.5)',
           borderRadius: 'var(--radius-lg)',
           border: `${isSelected ? 2 : 1}px solid ${isSelected ? 'var(--color-primary)' : 'rgba(63,63,70,0.5)'}`,
